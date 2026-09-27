@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>구매영수증 스캐너</title>
+  <style>
+    body { font-family: 'Apple SD Gothic Neo', sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; box-sizing: border-box; }
+    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; margin-top: 20px; }
+    h2 { color: #333; margin-bottom: 10px; }
+    input[type="file"] { display: none; }
+    
+    .btn-container { display: flex; flex-direction: column; gap: 12px; margin-top: 15px; }
+    .btn { background-color: #1a73e8; color: white; padding: 12px 20px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; width: 100%; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-upload { background-color: #34a853; }
+    .btn:active { opacity: 0.8; }
+    
+    #loading { display: none; margin-top: 15px; color: #1a73e8; font-size: 14px; font-weight: bold; }
+    #preview { max-width: 100%; max-height: 180px; margin-top: 15px; border-radius: 6px; display: none; object-fit: contain; }
+    
+    /* 웹캠 모달 창 (PC/스마트폰 웹캠 실시간 뷰어) */
+    #webcamModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; }
+    #webcamVideo { width: 90%; max-width: 480px; border-radius: 8px; background: #000; }
+    .webcam-btns { margin-top: 20px; display: flex; gap: 12px; }
+    
+    /* 결과 카드 스타일 */
+    .result-card { background: #e8f0fe; border: 1px solid #d2e3fc; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: left; display: none; width: 100%; max-width: 400px; box-sizing: border-box; }
+    .result-card h3 { margin-top: 0; color: #1967d2; font-size: 16px; border-bottom: 1px solid #cce0ff; padding-bottom: 8px; }
+    .result-item { font-size: 14px; margin-bottom: 6px; color: #3c4043; }
+    .result-item span { font-weight: bold; color: #202124; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>구매영수증 스캐너</h2>
+    <p style="color: #666; font-size: 14px;">노트북 웹캠 촬영 또는 갤러리 파일을 선택하세요.</p>
+    
+    <input type="file" id="galleryInput" accept="image/*" onchange="handleFileSelect(event)">
+    
+    <div class="btn-container">
+      <button class="btn" onclick="startCamera()">📸 카메라로 직접 촬영</button>
+      <button class="btn btn-upload" onclick="document.getElementById('galleryInput').click()">📁 갤러리에서 사진 업로드</button>
+    </div>
+    
+    <br>
+    <img id="preview" alt="미리보기">
+    <div id="loading">🔄 영수증을 분석하고 시트에 기록하는 중입니다...</div>
+  </div>
+
+  <!-- 웹캠 촬영 화면 모달 -->
+  <div id="webcamModal">
+    <video id="webcamVideo" autoplay playsinline></video>
+    <div class="webcam-btns">
+      <button class="btn btn-upload" style="width: auto; padding: 12px 24px;" onclick="captureWebcam()">📸 찰칵 (촬영)</button>
+      <button class="btn" style="background-color: #ea4335; width: auto; padding: 12px 24px;" onclick="closeCamera()">❌ 닫기</button>
+    </div>
+  </div>
+  <canvas id="webcamCanvas" style="display:none;"></canvas>
+
+  <div id="resultCard" class="result-card">
+    <h3>✅ 최근 스캔 성공 내역</h3>
+    <div class="result-item">상호명: <span id="resStore">-</span></div>
+    <div class="result-item">거래날짜: <span id="resDate">-</span></div>
+    <div class="result-item">구매목록: <span id="resItems">-</span></div>
+    <div class="result-item">금액: <span id="resTotal">-</span>원</div>
+  </div>
+
+  <script>
+    // ⚠️ 2단계에서 복사한 구글 앱스스크립트 '웹 앱 URL'을 아래에 붙여넣으세요!
+    const APPS_SCRIPT_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL";
+
+    let localStream = null;
+
+    function startCamera() {
+      const modal = document.getElementById('webcamModal');
+      const video = document.getElementById('webcamVideo');
+      modal.style.display = 'flex';
+
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        .then(stream => {
+          localStream = stream;
+          video.srcObject = stream;
+        })
+        .catch(err => {
+          alert("카메라를 실행할 수 없습니다. 브라우저의 카메라 권한을 확인해주세요.\n(오류: " + err.message + ")");
+          modal.style.display = 'none';
+        });
+    }
+
+    function closeCamera() {
+      const modal = document.getElementById('webcamModal');
+      const video = document.getElementById('webcamVideo');
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      video.srcObject = null;
+      modal.style.display = 'none';
+    }
+
+    function captureWebcam() {
+      const video = document.getElementById('webcamVideo');
+      const canvas = document.getElementById('webcamCanvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg');
+      const base64Image = dataUrl.split(',')[1];
+      
+      closeCamera();
+
+      const preview = document.getElementById('preview');
+      preview.src = dataUrl;
+      preview.style.display = 'block';
+
+      sendToServer(base64Image, 'image/jpeg');
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const fileMimeType = file.type;
+      const reader = new FileReader();
+      
+      reader.onload = function(e) {
+        const base64Image = e.target.result.split(',')[1];
+        const preview = document.getElementById('preview');
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+
+        sendToServer(base64Image, fileMimeType);
+      };
+      
+      reader.readAsDataURL(file);
+    }
+
+    function sendToServer(base64Image, mimeType) {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('resultCard').style.display = 'none';
+
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({ image: base64Image, mimeType: mimeType })
+      })
+      .then(response => response.json())
+      .then(res => {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('galleryInput').value = "";
+
+        if (res.success) {
+          document.getElementById('resStore').innerText = res.data.store;
+          document.getElementById('resDate').innerText = res.data.date;
+          document.getElementById('resItems').innerText = res.data.items;
+          document.getElementById('resTotal').innerText = Number(res.data.total).toLocaleString();
+          document.getElementById('resultCard').style.display = 'block';
+        } else {
+          alert("스캔 실패: " + res.message);
+        }
+      })
+      .catch(err => {
+        document.getElementById('loading').style.display = 'none';
+        alert("통신 오류가 발생했습니다: " + err.message);
+      });
+    }
+  </script>
+</body>
+</html>
